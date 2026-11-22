@@ -188,7 +188,7 @@ function processKnown(uid, now) {
 
   const msg = type === GIRIS ? 'GİRİŞİNİZ BAŞARI İLE YAPILDI' : 'ÇIKIŞINIZ BAŞARI İLE YAPILDI';
   showResult('ok', { name: upper(name), inner: `Kart okutma işleminiz tamamlandı...<br>${msg} : ${hm(time)}` }, OK_MS);
-  if (settings.voice) speak(settings.voiceTime ? `${name}. Saat ${hm(time)}` : name);
+  if (settings.voice) speak(settings.voiceTime ? `${name}. ${hm(time)} ${type === GIRIS ? 'giriş' : 'çıkış'}` : name);
 }
 
 function processUnknown(uid, now) {
@@ -361,7 +361,7 @@ function renderSettings() {
 }
 $('setVoice').addEventListener('change', (e) => { settings.voice = e.target.checked; save('pdks_settings', settings); renderSettings(); });
 $('setVoiceTime').addEventListener('change', (e) => { settings.voiceTime = e.target.checked; save('pdks_settings', settings); });
-$('btnTestVoice').addEventListener('click', () => speak(settings.voiceTime ? `Ahmet Yılmaz. Saat ${hm(timeStr())}` : 'Ahmet Yılmaz'));
+$('btnTestVoice').addEventListener('click', () => speak(settings.voiceTime ? `Ahmet Yılmaz. ${hm(timeStr())} giriş` : 'Ahmet Yılmaz'));
 
 /* ---------- Saat (tarih + LED saat) ---------- */
 const SEG = {
