@@ -47,18 +47,49 @@
   </div>
 </section>
 
-<!-- TANIMLAR -->
-<section id="scr-tanimlar" class="screen">
-  <header class="bar"><button class="back">‹ Ana Ekran</button><h2>Tanımlar</h2>
-    <button id="nfcToggle" class="nfc-st" title="NFC aç / kapat"><span>NFC :</span><i id="nfcOrb" class="orb off"></i></button></header>
-  <div class="content">
-    <div class="tip"><b id="tnTitle">Tanımlamak istediğiniz kartı okutunuz...</b><br><span id="tnSub">Kartı telefonun arkasına yaklaştırınız. Ad soyad girmeniz için pencere açılacaktır.</span></div>
+<!-- TANIMLAR (Mini Puantaj tanımlar ekranı) -->
+<section id="scr-tanimlar" class="screen mp">
+  <header class="topbar">
+    <div id="araKutu" class="searchbox">
+      <span id="araEtiketler" class="tags"></span>
+      <input id="txtAra" type="text" placeholder="İsim soyisim ara..." autocomplete="off">
+      <button id="btnAraTemizle" class="xbtn" title="Temizle">✕</button>
+    </div>
+    <button id="btnPersonelEkle" class="btn">Personel Ekle</button>
+    <button id="nfcToggle" class="nfc-st" title="NFC aç / kapat"><span>NFC :</span><i id="nfcOrb" class="orb off"></i></button>
+  </header>
+  <div class="tablewrap">
     <table class="grid">
-      <thead><tr><th>Adı Soyadı</th><th>Kart No</th><th></th></tr></thead>
-      <tbody id="cardList"></tbody>
+      <thead><tr><th>Adı Soyadı</th><th class="c-cins">Cinsiyeti</th></tr></thead>
+      <tbody id="tanimBody"></tbody>
     </table>
-    <p id="cardEmpty" class="empty">Henüz tanımlı kart yok.</p>
+    <div id="tanimEmpty" class="empty hidden"></div>
   </div>
+  <footer class="bottombar split">
+    <div class="btngroup">
+      <button id="btnDisaAktar" class="btn xlbtn"><svg class="xlicon" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="15" height="18" rx="2" fill="#21a366"/><rect x="14.5" y="3" width="7.5" height="18" rx="2" fill="#33c481"/><path d="M14.5 7.5H22M14.5 12H22M14.5 16.5H22" stroke="#185c37" stroke-width=".8"/><rect x="2" y="6" width="12" height="12" rx="1.6" fill="#107c41"/><path d="M5 8.6h2l1 2 1-2h2l-2 3.4 2 3.4H9l-1-2-1 2H5l2-3.4z" fill="#fff"/></svg>Dışa Aktar</button>
+      <button id="btnIceAktar" class="btn xlbtn"><svg class="xlicon" viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="3" width="15" height="18" rx="2" fill="#21a366"/><rect x="14.5" y="3" width="7.5" height="18" rx="2" fill="#33c481"/><path d="M14.5 7.5H22M14.5 12H22M14.5 16.5H22" stroke="#185c37" stroke-width=".8"/><rect x="2" y="6" width="12" height="12" rx="1.6" fill="#107c41"/><path d="M5 8.6h2l1 2 1-2h2l-2 3.4 2 3.4H9l-1-2-1 2H5l2-3.4z" fill="#fff"/></svg>İçe Aktar</button>
+      <input id="inpIceAktar" type="file" accept=".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel" class="hidden">
+    </div>
+    <button id="btnSilinenArsiv" class="btn xlbtn ortabtn"><svg class="kasaicon" viewBox="0 0 24 24" aria-hidden="true"><rect x="2.5" y="3" width="19" height="16" rx="2" fill="#5b6775"/><rect x="4.5" y="5" width="15" height="12" rx="1" fill="#8d99a6"/><circle cx="12" cy="11" r="3.6" fill="#e3e8ee" stroke="#3d4752" stroke-width="1"/><path d="M12 7.4v1.4M12 13.2v1.4M8.4 11h1.4M14.2 11h1.4" stroke="#3d4752" stroke-width="1"/><circle cx="12" cy="11" r="1" fill="#3d4752"/><rect x="17.2" y="8.5" width="1.3" height="5" rx=".6" fill="#3d4752"/><rect x="5" y="19" width="3" height="2" fill="#3d4752"/><rect x="16" y="19" width="3" height="2" fill="#3d4752"/></svg>Arşiv</button>
+    <button id="btnTanimKapat" class="btn">Kapat</button>
+  </footer>
+</section>
+
+<!-- SİLİNEN PERSONEL ARŞİVİ -->
+<section id="scr-silinen" class="screen mp">
+  <header class="topbar"><div class="title">SİLİNEN PERSONEL ARŞİVİ</div></header>
+  <div class="tablewrap">
+    <table class="grid">
+      <thead><tr><th class="c-zaman">Silme Zamanı</th><th>Adı Soyadı</th></tr></thead>
+      <tbody id="silinenBody"></tbody>
+    </table>
+    <div id="silinenEmpty" class="empty hidden">Silinen personel kaydı bulunmuyor.</div>
+  </div>
+  <footer class="bottombar split">
+    <button id="btnSilinenTumSil" class="btn danger">Tüm Arşiv Kayıtlarını Sil</button>
+    <button id="btnSilinenKapat" class="btn">Kapat</button>
+  </footer>
 </section>
 
 <!-- HAREKETLER -->
@@ -114,6 +145,36 @@
       <button id="mCancel">İptal</button>
       <button id="mOk" class="primary">Tamam</button>
     </div>
+  </div>
+</div>
+
+<!-- Tanımlar pencereleri (Mini Puantaj) -->
+<div class="mp">
+  <div id="overlay" class="overlay hidden"></div>
+  <div id="dlgPersonel" class="dialog yellow hidden">
+    <div class="dlg-title"><span id="dlgPersonelTitle">Personel</span><button class="xbtn dark" data-close>✕</button></div>
+    <div class="dlg-body">
+      <label>Adı Soyadı<input id="inpAd" type="text" maxlength="80" autocomplete="off"></label>
+      <label>Cinsiyeti
+        <select id="inpCins"><option>Erkek</option><option>Kadın</option><option selected>Bilinmiyor</option></select>
+      </label>
+      <label>Kart No
+        <span class="kartrow"><input id="inpKart" type="text" readonly tabindex="-1" placeholder="Kartı okutunuz..."><button id="btnKartSil" class="xbtn kartx" title="Kart no sil">✕</button></span>
+      </label>
+      <label class="chk"><input id="inpPasif" type="checkbox"> Pasife Al</label>
+      <div id="dlgPersonelErr" class="err"></div>
+    </div>
+    <div class="dlg-btns"><button class="btn" data-close>Vazgeç</button><button id="btnPersonelKaydet" class="btn primary">Kaydet</button></div>
+  </div>
+  <div id="dlgOnay" class="dialog small hidden">
+    <div class="dlg-title"><span id="onayTitle">Onay</span></div>
+    <div class="dlg-body"><p id="onayMsg"></p></div>
+    <div class="dlg-btns"><button id="onayEvet" class="btn primary">Evet</button><button id="onayHayir" class="btn">Hayır</button></div>
+  </div>
+  <div id="popMenu" class="popmenu hidden">
+    <button id="popSil">Kaydı Sil</button>
+    <button id="popEk" class="hidden"></button>
+    <button id="popVazgec">Vazgeç</button>
   </div>
 </div>
 

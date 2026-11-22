@@ -13,8 +13,9 @@ const isNative = !!(window.Android && window.Android.isNfcEnabled);
 /* ---------- Depolama ---------- */
 function load(k, d) { try { const v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch { return d; } }
 function save(k, v) { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} }
-let cards = load('pdks_cards', {});          // { kartNo: "Ad Soyad" }
-let records = load('pdks_records', []);      // [{id, uid, name, date:'YYYY-MM-DD', time:'HH:MM:SS', type}]
+let personel = load('pdks_personel', null);  // [{id, ad, cinsiyet, pasif, kart}]
+let silinen = load('pdks_silinen', []);       // [{id, zaman, ad, pasif, kart}] silinen personel arşivi
+let records = load('pdks_records', []);      // [{id, pid, uid, name, date:'YYYY-MM-DD', time:'HH:MM:SS', type}]
 let settings = Object.assign({ voice: false, voiceTime: false }, load('pdks_settings', {}));
 let lastOk = load('pdks_lastok', {});         // { kartNo: {ts, type} } son başarılı giriş/çıkış
 let unknownState = load('pdks_unknown', {});  // { kartNo: {date, ts, type} } tanımsız kartlar için
@@ -29,10 +30,31 @@ const trDate = (s) => s.split('-').reverse().join('.');
 const upper = (s) => s.toLocaleUpperCase('tr-TR');
 const normUid = (s) => String(s || '').replace(/[^0-9a-zA-Z]/g, '').toUpperCase();
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
-const uidName = (uid) => cards[uid] || (records.find((r) => r.uid === uid) || {}).name || uid;
 const typeOrder = (t) => (t === GIRIS ? 0 : 1);
 const sortRecs = (a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time) || typeOrder(a.type) - typeOrder(b.type);
 const newId = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const trKucuk = (s) => (s || '').toLocaleLowerCase('tr-TR');
+const adSirala = (a, b) => a.ad.localeCompare(b.ad, 'tr', { sensitivity: 'base' });
+
+/* ---------- Eski sürümden geçiş (kart -> personel) ---------- */
+if (!Array.isArray(personel)) {
+  personel = Object.entries(load('pdks_cards', {})).map(([kart, ad]) => ({ id: newId(), ad, cinsiyet: 'Bilinmiyor', pasif: false, kart }));
+  save('pdks_personel', personel);
+}
+if (records.some((r) => !r.pid)) {
+  records.forEach((r) => {
+    if (r.pid) return;
+    const p = personel.find((q) => q.kart === r.uid);
+    r.pid = p ? p.id : 'k_' + r.uid;
+  });
+  save('pdks_records', records);
+}
+const kaydetPersonel = () => save('pdks_personel', personel);
+const kaydetSilinen = () => save('pdks_silinen', silinen);
+const byKart = (k) => (k ? personel.find((p) => p.kart === k) : null);
+const pidPerson = (pid) => personel.find((p) => p.id === pid);
+const pidName = (pid) => (pidPerson(pid) || {}).ad || (records.find((r) => r.pid === pid) || {}).name || pid;
+const pidKart = (pid) => { const p = pidPerson(pid); if (p) return p.kart || ''; const r = records.find((x) => x.pid === pid); return r ? r.uid : ''; };
 
 function toast(msg, ms = 2500) {
   const t = $('toast'); t.textContent = msg; t.classList.remove('hidden');
@@ -61,8 +83,10 @@ function go(name) {
   screen = name;
   hidePanel();
   closeModal();
+  menuKapat();
   if (name === 'main') { window.scrollTo(0, 0); fitDate(); }
-  if (name === 'tanimlar') renderCards();
+  if (name === 'tanimlar') renderTanim();
+  if (name === 'silinen') renderSilinen();
   if (name === 'hareketler') openHareketler();
   if (name === 'ayarlar') renderSettings();
 }
@@ -71,7 +95,11 @@ document.querySelectorAll('[data-go]').forEach((b) => b.addEventListener('click'
 
 // Android geri tuşu
 window.handleBack = function () {
+  if (!$('popMenu').classList.contains('hidden')) { menuKapat(); return true; }
+  const d = acikDialog();
+  if (d) { if (d.id === 'dlgOnay') onayCb = null; dialogKapat(d.id); return true; }
   if (!$('modal').classList.contains('hidden')) { closeModal(); return true; }
+  if (screen === 'silinen') { go('tanimlar'); return true; }
   if (screen !== 'main') { go('main'); return true; }
   return false;
 };
@@ -93,13 +121,10 @@ function setNfcState(on) {
   if (nfcOn) {
     $('stTitle').textContent = 'Kart okutmanız için bekleniyor...';
     $('stSub').textContent = 'Personel kartınızı telefonun arkasına yaklaştırınız.';
-    $('tnTitle').textContent = 'Tanımlamak istediğiniz kartı okutunuz...';
   } else {
     $('stTitle').textContent = 'Cihazın kart okuma özelliği kapalı...';
     $('stSub').textContent = 'Kart okuma özelliğinin kapalı olduğunu yetkiliye haber veriniz.';
-    $('tnTitle').textContent = 'Cihazın kart okuma özelliği kapalı...';
   }
-  document.querySelector('#scr-tanimlar .tip').classList.toggle('off', !nfcOn);
   $('nfcOrb').classList.toggle('off', !nfcOn);
 }
 
@@ -155,22 +180,23 @@ function onCard(raw) {
   if (lastSeen[uid] && now - lastSeen[uid] < IGNORE_MS) return; // 5 sn içinde tekrar -> yok say
   lastSeen[uid] = now;
 
-  if (screen === 'tanimlar') { defineCard(uid); return; }
+  if (screen === 'tanimlar') { tanimKart(uid); return; }
   if (screen !== 'main') return;
 
-  if (cards[uid]) processKnown(uid, now); else processUnknown(uid, now);
+  const p = byKart(uid);
+  if (p && !p.pasif) processKnown(p, uid, now); else processUnknown(uid, now); // pasif personelin kartı tanımsız sayılır
 }
 
-function nextTypeFor(uid, today) {
-  const todays = records.filter((r) => r.uid === uid && r.date === today).sort(sortRecs);
+function nextTypeFor(pid, today) {
+  const todays = records.filter((r) => r.pid === pid && r.date === today).sort(sortRecs);
   const last = todays[todays.length - 1];
   return !last || last.type === CIKIS ? GIRIS : CIKIS;
 }
 
-function processKnown(uid, now) {
+function processKnown(p, uid, now) {
   const d = new Date(now), today = dateStr(d);
-  const name = cards[uid];
-  const lo = lastOk[uid];
+  const name = p.ad;
+  const lo = lastOk[p.id];
 
   // Son başarılı okutmadan bu yana 5 dk geçmediyse (aynı gün)
   if (lo && now - lo.ts < RECENT_MS && dateStr(new Date(lo.ts)) === today) {
@@ -180,11 +206,11 @@ function processKnown(uid, now) {
     return;
   }
 
-  const type = nextTypeFor(uid, today);
+  const type = nextTypeFor(p.id, today);
   const time = timeStr(d);
-  records.push({ id: newId(), uid, name, date: today, time, type });
+  records.push({ id: newId(), pid: p.id, uid, name, date: today, time, type });
   save('pdks_records', records);
-  lastOk[uid] = { ts: now, type };
+  lastOk[p.id] = { ts: now, type };
   save('pdks_lastok', lastOk);
 
   const msg = type === GIRIS ? 'GİRİŞİNİZ BAŞARI İLE YAPILDI' : 'ÇIKIŞINIZ BAŞARI İLE YAPILDI';
@@ -231,40 +257,364 @@ function confirmBox(title, text, okText, fn) {
   openModal(title, `<p>${esc(text)}</p>`, okText, fn, 'danger');
 }
 
-/* ---------- Tanımlar ---------- */
-function defineCard(uid) {
-  if (modalOpen()) return;
-  const cur = cards[uid] || '';
-  openModal(cur ? 'Kart Tanımını Düzenle' : 'Yeni Kart Tanımla',
-    `<label>Kart No</label><div class="mono">${esc(uid)}</div>
-     <label>Adı Soyadı</label><input type="text" id="inName" value="${esc(cur)}" autocomplete="off">`,
-    'Kaydet', () => {
-      const n = $('inName').value.trim().replace(/\s+/g, ' ');
-      if (!n) { toast('Adı soyadı giriniz.'); return false; }
-      cards[uid] = n; save('pdks_cards', cards);
-      renderCards(); toast(`${n} kartı ile eşleştirildi.`);
-    });
+/* ---------- Tanımlar (Mini Puantaj tanımlar ekranı) ---------- */
+const IKON = {
+  'Erkek': '<svg class="gicon" viewBox="0 0 24 24" aria-label="Erkek"><circle cx="12" cy="7.5" r="4.5" fill="#1f6fb5"/><path d="M3.5 22c0-5 3.8-8.5 8.5-8.5s8.5 3.5 8.5 8.5z" fill="#1f6fb5"/></svg>',
+  'Kadın': '<svg class="gicon" viewBox="0 0 24 24" aria-label="Kadın"><path d="M12 2.2c-3.4 0-5.6 2.6-5.6 6 0 2.2-.6 4-1.6 5.3 1.6.6 3.3.8 4.6.7a5 5 0 0 0 5.2 0c1.3.1 3-.1 4.6-.7-1-1.3-1.6-3.1-1.6-5.3 0-3.4-2.2-6-5.6-6z" fill="#c2185b"/><path d="M12 15c-3.5 0-6.2 2.4-7.5 7h15c-1.3-4.6-4-7-7.5-7z" fill="#c2185b"/></svg>',
+};
+const fmtZaman = (iso) => { const d = new Date(iso); return `${trDate(dateStr(d))} ${pad(d.getHours())}:${pad(d.getMinutes())}`; };
+
+/* Pencereler */
+const acikDialog = () => document.querySelector('.mp .dialog:not(.hidden)');
+function dialogAc(id) { $('overlay').classList.remove('hidden'); $('overlay').style.background = ''; $(id).classList.remove('hidden'); }
+function dialogKapat(id) {
+  $(id).classList.add('hidden');
+  if (!acikDialog() && $('popMenu').classList.contains('hidden')) $('overlay').classList.add('hidden');
 }
-function renderCards() {
-  const list = Object.entries(cards).sort((a, b) => a[1].localeCompare(b[1], 'tr'));
-  $('cardList').innerHTML = list.map(([uid, n]) =>
-    `<tr><td>${esc(n)}</td><td class="mono">${esc(uid)}</td>
-     <td class="x" style="white-space:nowrap"><button class="ebtn" data-edit="${esc(uid)}">Düzenle</button><button class="xbtn" data-del="${esc(uid)}" title="Sil">✕</button></td></tr>`).join('');
-  $('cardEmpty').classList.toggle('hidden', list.length > 0);
+document.querySelectorAll('.mp [data-close]').forEach((b) => b.addEventListener('click', () => dialogKapat(b.closest('.dialog').id)));
+$('overlay').addEventListener('click', () => { if (!$('popMenu').classList.contains('hidden')) menuKapat(); });
+
+let onayCb = null;
+function onay(baslik, mesaj, cb) {
+  $('onayTitle').textContent = baslik; $('onayMsg').textContent = mesaj; onayCb = cb;
+  $('onayEvet').textContent = 'Evet'; $('onayHayir').classList.remove('hidden');
+  dialogAc('dlgOnay');
 }
-$('cardList').addEventListener('click', (e) => {
-  const ed = e.target.closest('[data-edit]'), del = e.target.closest('[data-del]');
-  if (ed) defineCard(ed.dataset.edit);
-  if (del) {
-    const uid = del.dataset.del;
-    confirmBox('Kart Tanımını Sil', `${cards[uid]} (${uid}) tanımı silinsin mi? Hareket kayıtları silinmez.`, 'Sil', () => {
-      delete cards[uid]; save('pdks_cards', cards); renderCards();
+function uyari(baslik, mesaj) {
+  $('onayTitle').textContent = baslik; $('onayMsg').textContent = mesaj; onayCb = null;
+  $('onayEvet').textContent = 'Tamam'; $('onayHayir').classList.add('hidden');
+  dialogAc('dlgOnay');
+}
+$('onayEvet').addEventListener('click', () => { const f = onayCb; onayCb = null; dialogKapat('dlgOnay'); if (f) f(); });
+$('onayHayir').addEventListener('click', () => { onayCb = null; dialogKapat('dlgOnay'); });
+
+/* Uzun basma menüsü */
+let menuSil = null, menuEk = null;
+function menuAc(x, y, silFn, ek) {
+  const m = $('popMenu'); menuSil = silFn; menuEk = ek ? ek.fn : null;
+  $('popEk').textContent = ek ? ek.yazi : '';
+  $('popEk').classList.toggle('hidden', !ek);
+  m.classList.remove('hidden');
+  const w = m.offsetWidth, h = m.offsetHeight;
+  m.style.left = Math.max(8, Math.min(x, window.innerWidth - w - 8)) + 'px';
+  m.style.top = Math.max(8, Math.min(y, window.innerHeight - h - 8)) + 'px';
+  $('overlay').classList.remove('hidden'); $('overlay').style.background = 'transparent';
+}
+function menuKapat() {
+  $('popMenu').classList.add('hidden'); menuSil = null; menuEk = null;
+  if (!acikDialog()) $('overlay').classList.add('hidden');
+  $('overlay').style.background = '';
+}
+$('popVazgec').addEventListener('click', menuKapat);
+$('popSil').addEventListener('click', () => { const f = menuSil; menuKapat(); if (f) f(); });
+$('popEk').addEventListener('click', () => { const f = menuEk; menuKapat(); if (f) f(); });
+
+/* Satır etkileşimi: uzun basma + çift dokunma */
+function satirSec(tr) {
+  tr.parentNode.querySelectorAll('.selected').forEach((r) => r.classList.remove('selected'));
+  tr.classList.add('selected');
+}
+function satirEtkilesim(tr, onLong, onDouble) {
+  let timer = null, sx = 0, sy = 0, uzun = false, sonTik = 0;
+  tr.addEventListener('pointerdown', (e) => {
+    if (e.button && e.button !== 0) return;
+    uzun = false; sx = e.clientX; sy = e.clientY;
+    clearTimeout(timer);
+    timer = setTimeout(() => { uzun = true; satirSec(tr); onLong(tr, sx, sy); if (navigator.vibrate) navigator.vibrate(30); }, 550);
+  });
+  tr.addEventListener('pointermove', (e) => { if (Math.abs(e.clientX - sx) > 10 || Math.abs(e.clientY - sy) > 10) clearTimeout(timer); });
+  ['pointerup', 'pointercancel', 'pointerleave'].forEach((ev) => tr.addEventListener(ev, () => clearTimeout(timer)));
+  tr.addEventListener('contextmenu', (e) => e.preventDefault());
+  tr.addEventListener('click', () => {
+    if (uzun) { uzun = false; return; }
+    satirSec(tr);
+    const t = Date.now();
+    if (t - sonTik < 400) { sonTik = 0; onDouble(tr); } else sonTik = t;
+  });
+}
+
+/* İsimleri sahaya sığdır */
+function sigdir(kok) {
+  requestAnimationFrame(() => {
+    (kok || document).querySelectorAll('.mp .fit').forEach((el) => {
+      el.style.fontSize = '';
+      let fs = parseFloat(getComputedStyle(el).fontSize) || 16;
+      while (fs > 9 && el.scrollWidth > el.clientWidth + 0.5) { fs -= 0.5; el.style.fontSize = fs + 'px'; }
     });
+  });
+}
+
+/* Arama */
+let araKelimeler = [];
+const aramaKelimeleri = () => araKelimeler.concat($('txtAra').value.split(/\s+/).filter(Boolean)).map(trKucuk);
+function renderChips() {
+  const box = $('araEtiketler'); box.innerHTML = '';
+  araKelimeler.forEach((k, i) => {
+    const c = document.createElement('span'); c.className = 'chip';
+    c.innerHTML = `<span>${esc(k)}</span><button class="xbtn" title="Kelimeyi sil">✕</button>`;
+    c.querySelector('button').addEventListener('click', (e) => { e.stopPropagation(); araKelimeler.splice(i, 1); renderTanim(); });
+    box.appendChild(c);
+  });
+  $('txtAra').placeholder = araKelimeler.length ? '' : 'İsim soyisim ara...';
+}
+function araGirdi() {
+  const v = $('txtAra').value;
+  if (/\s/.test(v)) {
+    const parca = v.split(/\s+/), son = parca.pop();
+    parca.filter(Boolean).forEach((k) => araKelimeler.push(k));
+    $('txtAra').value = son;
   }
+  renderTanim();
+}
+
+function renderTanim() {
+  renderChips();
+  const kel = aramaKelimeleri();
+  const liste = personel.slice().sort(adSirala).filter((p) => {
+    if (!kel.length) return true;
+    const ad = trKucuk(p.ad);
+    return kel.some((k) => ad.indexOf(k) >= 0);
+  });
+  const tb = $('tanimBody'); tb.innerHTML = '';
+  const bos = $('tanimEmpty');
+  bos.classList.toggle('hidden', liste.length > 0);
+  bos.innerHTML = personel.length ? 'Aramaya uyan personel bulunamadı.' : 'Henüz personel yok.<br>“Personel Ekle” ile ekleyebilirsiniz.';
+  liste.forEach((p) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><span class="fit"><span class="pname${p.pasif ? ' pasif' : ''}">${esc(p.ad)}</span>` +
+      (p.pasif ? '<span class="pasiftag">(PASİF)</span>' : '') + '</span></td>' +
+      `<td><span class="cins">${esc(p.cinsiyet)}${IKON[p.cinsiyet] || ''}</span></td>`;
+    satirEtkilesim(tr, (r, x, y) => {
+      menuAc(x, y, () => {
+        onay('Personel Sil', `“${p.ad}” silinsin mi?`, () => {
+          personel = personel.filter((q) => q.id !== p.id);
+          silinen.push({ id: newId(), zaman: new Date().toISOString(), ad: p.ad, pasif: !!p.pasif, kart: p.kart || '' });
+          kaydetPersonel(); kaydetSilinen(); renderTanim(); toast('Personel silindi ve arşive alındı.');
+        });
+      }, {
+        yazi: p.pasif ? 'Aktif Yap' : 'Pasif Yap',
+        fn: () => {
+          p.pasif = !p.pasif; kaydetPersonel(); renderTanim();
+          toast(`“${p.ad}” ${p.pasif ? 'pasif yapıldı.' : 'aktif yapıldı.'}`);
+        },
+      });
+    }, () => personelDialog(p));
+    tb.appendChild(tr);
+  });
+  sigdir(tb);
+}
+
+/* Personel ekle / düzenle penceresi */
+let duzenlenen = null;
+function personelDialog(p, kart) {
+  duzenlenen = p || null;
+  $('dlgPersonelTitle').textContent = p ? 'Personel Düzenle' : 'Personel Ekle';
+  $('inpAd').value = p ? p.ad : '';
+  $('inpCins').value = p ? p.cinsiyet : 'Bilinmiyor';
+  $('inpKart').value = p ? (p.kart || '') : (kart || '');
+  $('inpPasif').checked = !!(p && p.pasif);
+  $('dlgPersonelErr').textContent = '';
+  dialogAc('dlgPersonel');
+  if (!p) setTimeout(() => $('inpAd').focus(), 50);
+}
+const kartSahibi = (kart) => { const o = byKart(kart); return o && o !== duzenlenen ? o : null; };
+function personelKaydet() {
+  const ad = $('inpAd').value.replace(/\s+/g, ' ').trim();
+  if (!ad) { $('dlgPersonelErr').textContent = 'Adı soyadı boş olamaz.'; return false; }
+  if (personel.some((q) => q !== duzenlenen && trKucuk(q.ad) === trKucuk(ad))) { $('dlgPersonelErr').textContent = 'Bu isimde bir personel zaten var.'; return false; }
+  const kart = $('inpKart').value.trim();
+  const sahip = kartSahibi(kart);
+  if (sahip) { uyari('Uyarı', `${kart} kart no “${sahip.ad}” adlı personele tanımlı.`); return false; }
+  const pasif = $('inpPasif').checked;
+  if (duzenlenen) Object.assign(duzenlenen, { ad, cinsiyet: $('inpCins').value, pasif, kart });
+  else personel.push({ id: newId(), ad, cinsiyet: $('inpCins').value, pasif, kart });
+  kaydetPersonel(); dialogKapat('dlgPersonel'); renderTanim();
+  return true;
+}
+$('btnPersonelKaydet').addEventListener('click', personelKaydet);
+$('inpAd').addEventListener('keydown', (e) => { if (e.key === 'Enter') personelKaydet(); });
+$('btnPersonelEkle').addEventListener('click', () => personelDialog(null));
+
+// Kart No sahasının yanındaki ✕: onaydan sonra sahayı boşalt, kaydet ve pencereyi kapat
+$('btnKartSil').addEventListener('click', (e) => {
+  e.preventDefault();
+  const cur = $('inpKart').value;
+  if (!cur) return;
+  onay('Kart No Sil', `${cur} kart no silinecektir. Devam etmek istiyor musunuz?`, () => {
+    $('inpKart').value = '';
+    personelKaydet();
+  });
 });
+// Kart No sahasına elle veri girilemez
+['keydown', 'paste', 'drop', 'beforeinput'].forEach((ev) => $('inpKart').addEventListener(ev, (e) => e.preventDefault()));
+$('inpKart').addEventListener('focus', () => $('inpKart').blur());
+
+// Tanımlar ekranında NFC ile kart okutulunca
+function tanimKart(uid) {
+  if (!$('dlgOnay').classList.contains('hidden')) return; // onay/uyarı açıkken yok say
+  if ($('dlgPersonel').classList.contains('hidden')) {
+    // pencere kapalı: kart tanımlıysa o personeli düzenle, değilse yeni personel penceresini kart no ile aç
+    menuKapat();
+    const p = byKart(uid);
+    personelDialog(p || null, p ? '' : uid);
+    return;
+  }
+  const cur = $('inpKart').value;
+  if (cur === uid) return; // aynı kart tekrar okutuldu: hiçbir şey yapma
+  const sahip = kartSahibi(uid);
+  if (sahip) { uyari('Uyarı', `${uid} kart no “${sahip.ad}” adlı personele tanımlı.`); return; }
+  if (!cur) { $('inpKart').value = uid; return; }
+  onay('Kart No Değişikliği', `${cur} kart no silinip yerine ${uid} kart no tanımlanacaktır. Devam etmek istiyor musunuz?`, () => {
+    $('inpKart').value = uid;
+    personelKaydet();
+  });
+}
+
+$('txtAra').addEventListener('input', araGirdi);
+$('txtAra').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && $('txtAra').value.trim()) { araKelimeler.push($('txtAra').value.trim()); $('txtAra').value = ''; renderTanim(); }
+  else if (e.key === 'Backspace' && !$('txtAra').value && araKelimeler.length) { araKelimeler.pop(); renderTanim(); }
+});
+$('araKutu').addEventListener('click', () => $('txtAra').focus());
+$('btnAraTemizle').addEventListener('click', (e) => { e.stopPropagation(); araKelimeler = []; $('txtAra').value = ''; renderTanim(); });
+$('btnSilinenArsiv').addEventListener('click', () => go('silinen'));
+$('btnTanimKapat').addEventListener('click', () => go('main'));
+
+/* Silinen personel arşivi */
+function renderSilinen() {
+  const liste = silinen.slice().sort((a, b) => (a.zaman < b.zaman ? 1 : a.zaman > b.zaman ? -1 : 0));
+  const tb = $('silinenBody'); tb.innerHTML = '';
+  $('silinenEmpty').classList.toggle('hidden', liste.length > 0);
+  liste.forEach((k) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td><b>${fmtZaman(k.zaman)}</b></td><td><span class="fit"><span class="pname">${esc(k.ad)}</span></span>` +
+      (k.pasif ? '<span class="pasifken">(PASİFKEN)</span>' : '') + '</td>';
+    satirEtkilesim(tr, (r, x, y) => {
+      menuAc(x, y, () => {
+        onay('Kayıt Sil', `“${k.ad}” silme kaydı arşivden silinsin mi?`, () => {
+          silinen = silinen.filter((q) => q.id !== k.id); kaydetSilinen(); renderSilinen(); toast('Kayıt silindi.');
+        });
+      });
+    }, () => {});
+    tb.appendChild(tr);
+  });
+  const ilk = tb.querySelector('tr'); if (ilk) satirSec(ilk);
+  sigdir(tb);
+}
+$('btnSilinenTumSil').addEventListener('click', () => {
+  if (!silinen.length) { toast('Silinecek kayıt yok.'); return; }
+  onay('Tümünü Sil', `Tüm arşiv kayıtları (${silinen.length} adet) silinsin mi?`, () => {
+    silinen = []; kaydetSilinen(); renderSilinen(); toast('Tüm arşiv silindi.');
+  });
+});
+$('btnSilinenKapat').addEventListener('click', () => go('tanimlar'));
+
+/* Excel Dışa Aktar / İçe Aktar */
+let xlsxSoz = null;
+function xlsxYukle() {
+  if (window.XLSX) return Promise.resolve(window.XLSX);
+  if (!xlsxSoz) xlsxSoz = new Promise((ok, hata) => {
+    const sc = document.createElement('script'); sc.src = 'vendor/xlsx.full.min.js';
+    sc.onload = () => ok(window.XLSX);
+    sc.onerror = () => { xlsxSoz = null; hata(new Error('xlsx yüklenemedi')); };
+    document.head.appendChild(sc);
+  });
+  return xlsxSoz;
+}
+function dosyaKaydet(b64, ad, mime, mesaj) {
+  if (isNative && window.Android.saveFile) {
+    const r = window.Android.saveFile(ad, b64, mime);
+    toast(r ? `${mesaj} (İndirilenler/${ad})` : 'Dosya kaydedilemedi.', 3500);
+    return Promise.resolve();
+  }
+  const url = `data:${mime};base64,${b64}`;
+  return fetch(url).then((r) => r.blob()).then((blob) => {
+    const file = new File([blob], ad, { type: mime });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      return navigator.share({ files: [file], title: ad }).catch((e) => { if (e && e.name !== 'AbortError') indir(url, ad); });
+    }
+    indir(url, ad); toast(mesaj);
+  });
+}
+function indir(url, ad) { const a = document.createElement('a'); a.href = url; a.download = ad; document.body.appendChild(a); a.click(); a.remove(); }
+
+function disaAktar() {
+  xlsxYukle().then((X) => {
+    const pRows = personel.slice().sort(adSirala).map((p) => ({ 'Adı Soyadı': p.ad, 'Cinsiyeti': p.cinsiyet, 'Kart No': p.kart || '', 'Durumu': p.pasif ? 'Pasif' : 'Aktif' }));
+    const hRows = records.slice().sort((a, b) => pidName(a.pid).localeCompare(pidName(b.pid), 'tr') || sortRecs(a, b))
+      .map((r) => ({ 'Adı Soyadı': pidName(r.pid), 'Kart No': r.uid || '', 'Tarih': trDate(r.date), 'Saat': hm(r.time), 'Tür': r.type }));
+    const wb = X.utils.book_new();
+    const ws1 = X.utils.json_to_sheet(pRows, { header: ['Adı Soyadı', 'Cinsiyeti', 'Kart No', 'Durumu'] });
+    ws1['!cols'] = [{ wch: 32 }, { wch: 12 }, { wch: 18 }, { wch: 10 }];
+    const ws2 = X.utils.json_to_sheet(hRows, { header: ['Adı Soyadı', 'Kart No', 'Tarih', 'Saat', 'Tür'] });
+    ws2['!cols'] = [{ wch: 32 }, { wch: 18 }, { wch: 12 }, { wch: 8 }, { wch: 8 }];
+    X.utils.book_append_sheet(wb, ws1, 'Personel');
+    X.utils.book_append_sheet(wb, ws2, 'Hareketler');
+    const b64 = X.write(wb, { bookType: 'xlsx', type: 'base64' });
+    return dosyaKaydet(b64, `pdks_${dateStr()}.xlsx`, 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', 'Excel dosyası kaydedildi.');
+  }).catch((e) => { console.error(e); toast('Dışa aktarılamadı.'); });
+}
+
+const CINS_GERI = { 'erkek': 'Erkek', 'kadın': 'Kadın', 'kadin': 'Kadın', 'bilinmiyor': 'Bilinmiyor' };
+function hucre(row, adlar) {
+  for (const a of adlar) for (const k in row) if (trKucuk(k).replace(/\s+/g, ' ').trim() === a) return row[k];
+  return undefined;
+}
+function tarihCoz(v) {
+  if (v instanceof Date) return dateStr(v);
+  const m = String(v || '').trim().match(/^(\d{1,2})[.\/](\d{1,2})[.\/](\d{4})/);
+  return m ? `${m[3]}-${pad(+m[2])}-${pad(+m[1])}` : null;
+}
+function saatCoz(v) {
+  if (v instanceof Date) return `${pad(v.getHours())}:${pad(v.getMinutes())}`;
+  if (typeof v === 'number') { const t = Math.round(v * 1440); return `${pad(Math.floor(t / 60) % 24)}:${pad(t % 60)}`; }
+  const m = String(v || '').trim().match(/^(\d{1,2}):(\d{2})/);
+  return m ? `${pad(+m[1])}:${m[2]}` : null;
+}
+function iceAktar(dosya) {
+  Promise.all([xlsxYukle(), dosya.arrayBuffer()]).then(([X, buf]) => {
+    const wb = X.read(buf, { type: 'array', cellDates: true });
+    const sPers = wb.Sheets['Personel'] || wb.Sheets[wb.SheetNames[0]];
+    const sHar = wb.Sheets['Hareketler'];
+    const yeniP = [], yeniH = [];
+    const adBul = (liste, ad) => liste.find((q) => trKucuk(q.ad) === trKucuk(ad));
+    if (sPers) X.utils.sheet_to_json(sPers, { defval: '' }).forEach((row) => {
+      const ad = String(hucre(row, ['adı soyadı', 'adi soyadi', 'ad soyad', 'isim soyisim', 'isim']) || row[Object.keys(row)[0]] || '').replace(/\s+/g, ' ').trim();
+      if (!ad || adBul(personel, ad) || adBul(yeniP, ad)) return;
+      const cins = CINS_GERI[trKucuk(String(hucre(row, ['cinsiyeti', 'cinsiyet']) || '').trim())] || 'Bilinmiyor';
+      const pasif = trKucuk(String(hucre(row, ['durumu', 'durum']) || '')).trim() === 'pasif';
+      let kart = normUid(hucre(row, ['kart no', 'kartno', 'kart']));
+      if (kart && (byKart(kart) || yeniP.some((q) => q.kart === kart) || kart === ADMIN_CARD)) kart = '';
+      yeniP.push({ id: newId(), ad, cinsiyet: cins, pasif, kart });
+    });
+    if (sHar) X.utils.sheet_to_json(sHar, { defval: '', raw: true }).forEach((row) => {
+      const ad = String(hucre(row, ['adı soyadı', 'adi soyadi', 'ad soyad']) || '').replace(/\s+/g, ' ').trim();
+      const p = adBul(personel, ad) || adBul(yeniP, ad); if (!p) return;
+      const date = tarihCoz(hucre(row, ['tarih'])), t = saatCoz(hucre(row, ['saat']));
+      const tur = trKucuk(String(hucre(row, ['tür', 'tur']) || '')).trim();
+      const type = tur.startsWith('g') ? GIRIS : tur.startsWith('ç') || tur.startsWith('c') ? CIKIS : null;
+      if (!date || !t || !type) return;
+      const time = t + ':00';
+      const ayni = (r) => r.pid === p.id && r.date === date && hm(r.time) === t && r.type === type;
+      if (records.some(ayni) || yeniH.some(ayni)) return;
+      yeniH.push({ id: newId(), pid: p.id, uid: normUid(hucre(row, ['kart no'])) || p.kart || '', name: p.ad, date, time, type });
+    });
+    if (!yeniP.length && !yeniH.length) { toast('Dosyada eklenecek yeni kayıt bulunamadı.'); return; }
+    onay('İçe Aktar', `${yeniP.length} yeni personel ve ${yeniH.length} yeni hareket kaydı eklensin mi? (Var olan kayıtlar silinmez)`, () => {
+      yeniP.forEach((p) => personel.push(p));
+      yeniH.forEach((h) => records.push(h));
+      kaydetPersonel(); save('pdks_records', records); renderTanim();
+      toast(`${yeniP.length} personel, ${yeniH.length} hareket kaydı eklendi.`);
+    });
+  }).catch((e) => { console.error(e); toast('Dosya okunamadı. Excel (.xlsx) dosyası seçiniz.'); });
+}
+$('btnDisaAktar').addEventListener('click', disaAktar);
+$('btnIceAktar').addEventListener('click', () => { $('inpIceAktar').value = ''; $('inpIceAktar').click(); });
+$('inpIceAktar').addEventListener('change', function () { if (this.files && this.files[0]) iceAktar(this.files[0]); });
+window.addEventListener('resize', () => { clearTimeout(sigdir.t); sigdir.t = setTimeout(() => sigdir(), 150); });
 
 /* ---------- Hareketler ---------- */
-let selUid = null;
+let selPid = null;
 function range() {
   const s = $('fStart').value || dateStr();
   let e = $('fEnd').value || s;
@@ -274,30 +624,30 @@ function range() {
 function openHareketler() {
   const t = dateStr();
   $('fStart').value = t; $('fEnd').value = t;
-  selUid = null;
+  selPid = null;
   renderPersons();
 }
 function renderPersons() {
   const [s, e] = range();
-  const uids = [...new Set(records.filter((r) => r.date >= s && r.date <= e).map((r) => r.uid))]
-    .sort((a, b) => uidName(a).localeCompare(uidName(b), 'tr'));
-  if (!uids.includes(selUid)) selUid = uids[0] || null;
-  $('perList').innerHTML = uids.map((u) =>
-    `<tr data-uid="${esc(u)}" class="${u === selUid ? 'on' : ''}"><td>${esc(uidName(u))}</td><td class="mono">${esc(u)}</td></tr>`).join('');
-  $('perEmpty').classList.toggle('hidden', uids.length > 0);
+  const pids = [...new Set(records.filter((r) => r.date >= s && r.date <= e).map((r) => r.pid))]
+    .sort((a, b) => pidName(a).localeCompare(pidName(b), 'tr'));
+  if (!pids.includes(selPid)) selPid = pids[0] || null;
+  $('perList').innerHTML = pids.map((u) =>
+    `<tr data-pid="${esc(u)}" class="${u === selPid ? 'on' : ''}"><td>${esc(pidName(u))}</td><td class="mono">${esc(pidKart(u))}</td></tr>`).join('');
+  $('perEmpty').classList.toggle('hidden', pids.length > 0);
   renderMoves();
 }
 function renderMoves() {
   const [s, e] = range();
-  const list = selUid ? records.filter((r) => r.uid === selUid && r.date >= s && r.date <= e).sort(sortRecs) : [];
+  const list = selPid ? records.filter((r) => r.pid === selPid && r.date >= s && r.date <= e).sort(sortRecs) : [];
   $('movList').innerHTML = list.map((r) =>
     `<tr><td>${trDate(r.date)}</td><td>${hm(r.time)}</td><td class="tag ${r.type === GIRIS ? 'g' : 'c'}">${r.type}</td>
      <td class="x"><button class="xbtn" data-rid="${r.id}" title="Sil">✕</button></td></tr>`).join('');
   $('movEmpty').classList.toggle('hidden', list.length > 0);
 }
 $('perList').addEventListener('click', (e) => {
-  const tr = e.target.closest('tr[data-uid]'); if (!tr) return;
-  selUid = tr.dataset.uid;
+  const tr = e.target.closest('tr[data-pid]'); if (!tr) return;
+  selPid = tr.dataset.pid;
   document.querySelectorAll('#perList tr').forEach((x) => x.classList.toggle('on', x === tr));
   renderMoves();
 });
@@ -306,28 +656,28 @@ $('fEnd').addEventListener('change', renderPersons);
 $('movList').addEventListener('click', (e) => {
   const b = e.target.closest('[data-rid]'); if (!b) return;
   const r = records.find((x) => x.id === b.dataset.rid); if (!r) return;
-  confirmBox('Hareket Kaydını Sil', `${uidName(r.uid)} - ${trDate(r.date)} ${hm(r.time)} ${r.type} kaydı silinsin mi?`, 'Sil', () => {
+  confirmBox('Hareket Kaydını Sil', `${pidName(r.pid)} - ${trDate(r.date)} ${hm(r.time)} ${r.type} kaydı silinsin mi?`, 'Sil', () => {
     records = records.filter((x) => x.id !== r.id); save('pdks_records', records); renderPersons();
   });
 });
 $('btnAdd').addEventListener('click', () => {
-  if (!selUid) { toast('Önce üstteki listeden bir personel seçiniz.'); return; }
-  const uid = selUid, name = uidName(uid);
+  if (!selPid) { toast('Önce üstteki listeden bir personel seçiniz.'); return; }
+  const pid = selPid, name = pidName(pid), uid = pidKart(pid);
   const now = new Date();
   const e = range()[1];
   openModal('Hareket Ekle',
-    `<div><b>${esc(name)}</b> <span class="mono">(${esc(uid)})</span></div>
+    `<div><b>${esc(name)}</b>${uid ? ` <span class="mono">(${esc(uid)})</span>` : ''}</div>
      <label>Tarih</label><input type="date" id="aDate" value="${e < dateStr() ? e : dateStr()}">
      <label>Saat</label><input type="time" id="aTime" value="${pad(now.getHours())}:${pad(now.getMinutes())}">
      <label>Geçiş Türü</label><select id="aType"><option>${GIRIS}</option><option>${CIKIS}</option></select>`,
     'Ekle', () => {
       const date = $('aDate').value, t = $('aTime').value.slice(0, 5), type = $('aType').value;
       if (!date || !t) { toast('Tarih ve saat giriniz.'); return false; }
-      if (records.some((r) => r.uid === uid && r.date === date && hm(r.time) === t)) {
+      if (records.some((r) => r.pid === pid && r.date === date && hm(r.time) === t)) {
         toast('Bu zamana ait bir hareket kaydı zaten var.', 3500);
         return false;
       }
-      records.push({ id: newId(), uid, name, date, time: t + ':00', type });
+      records.push({ id: newId(), pid, uid, name, date, time: t + ':00', type });
       save('pdks_records', records);
       const [s0, e0] = range();
       if (date < s0) $('fStart').value = date;
@@ -448,7 +798,8 @@ $('startOverlay').addEventListener('click', () => { speak(' '); startWebNfc(true
 let kbBuf = '', kbTime = 0;
 document.addEventListener('keydown', (e) => {
   const tag = (e.target && e.target.tagName) || '';
-  if (tag === 'INPUT' || tag === 'SELECT' || tag === 'TEXTAREA' || modalOpen()) return;
+  const ro = e.target && e.target.readOnly;
+  if ((tag === 'INPUT' && !ro) || tag === 'SELECT' || tag === 'TEXTAREA' || modalOpen()) return;
   const now = Date.now();
   if (now - kbTime > 300) kbBuf = '';
   kbTime = now;

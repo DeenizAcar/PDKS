@@ -19,6 +19,16 @@ import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.webkit.WebViewClient;
 
+import android.content.ContentValues;
+import android.net.Uri;
+import android.os.Environment;
+import android.provider.MediaStore;
+import android.util.Base64;
+import android.webkit.ValueCallback;
+
+import java.io.File;
+import java.io.FileOutputStream;
+import java.io.OutputStream;
 import java.util.Locale;
 
 public class MainActivity extends Activity implements NfcAdapter.ReaderCallback {
@@ -28,6 +38,8 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
     private TextToSpeech tts;
     private boolean ttsReady = false;
     private boolean pageReady = false;
+    private ValueCallback<Uri[]> fileCb;
+    private static final int REQ_FILE = 41;
 
     private final BroadcastReceiver nfcStateReceiver = new BroadcastReceiver() {
         @Override
@@ -68,7 +80,27 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
         ws.setSupportZoom(false);
         ws.setBuiltInZoomControls(false);
         web.addJavascriptInterface(new Bridge(), "Android");
-        web.setWebChromeClient(new WebChromeClient());
+        web.setWebChromeClient(new WebChromeClient() {
+            // Excel içe aktarma için dosya seçici
+            @Override
+            public boolean onShowFileChooser(WebView v, ValueCallback<Uri[]> cb, FileChooserParams params) {
+                if (fileCb != null) fileCb.onReceiveValue(null);
+                fileCb = cb;
+                try {
+                    Intent i = new Intent(Intent.ACTION_GET_CONTENT);
+                    i.addCategory(Intent.CATEGORY_OPENABLE);
+                    i.setType("*/*");
+                    i.putExtra(Intent.EXTRA_MIME_TYPES, new String[]{
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            "application/vnd.ms-excel", "application/octet-stream"});
+                    startActivityForResult(Intent.createChooser(i, "Excel dosyası seçin"), REQ_FILE);
+                } catch (Exception e) {
+                    fileCb = null;
+                    return false;
+                }
+                return true;
+            }
+        });
         web.setWebViewClient(new WebViewClient() {
             @Override
             public void onPageFinished(WebView v, String url) {
@@ -162,6 +194,16 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
     }
 
     @Override
+    protected void onActivityResult(int req, int res, Intent data) {
+        super.onActivityResult(req, res, data);
+        if (req == REQ_FILE && fileCb != null) {
+            Uri u = (res == RESULT_OK && data != null) ? data.getData() : null;
+            fileCb.onReceiveValue(u != null ? new Uri[]{u} : null);
+            fileCb = null;
+        }
+    }
+
+    @Override
     protected void onDestroy() {
         try { unregisterReceiver(nfcStateReceiver); } catch (Exception ignored) { }
         if (tts != null) tts.shutdown();
@@ -174,6 +216,30 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
 
         @JavascriptInterface
         public boolean hasNfc() { return nfc != null; }
+
+        // Excel dışa aktarma: dosyayı İndirilenler klasörüne kaydeder
+        @JavascriptInterface
+        public boolean saveFile(String name, String b64, String mime) {
+            try {
+                byte[] bytes = Base64.decode(b64, Base64.DEFAULT);
+                if (Build.VERSION.SDK_INT >= 29) {
+                    ContentValues cv = new ContentValues();
+                    cv.put(MediaStore.MediaColumns.DISPLAY_NAME, name);
+                    cv.put(MediaStore.MediaColumns.MIME_TYPE, mime);
+                    cv.put(MediaStore.MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_DOWNLOADS);
+                    Uri uri = getContentResolver().insert(MediaStore.Downloads.EXTERNAL_CONTENT_URI, cv);
+                    if (uri == null) return false;
+                    try (OutputStream os = getContentResolver().openOutputStream(uri)) { os.write(bytes); }
+                } else {
+                    File dir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);
+                    dir.mkdirs();
+                    try (FileOutputStream os = new FileOutputStream(new File(dir, name))) { os.write(bytes); }
+                }
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
+        }
 
         // Android, uygulamaların NFC'yi doğrudan açıp kapatmasına izin vermez;
         // bu yüzden NFC ayar ekranı açılır, geri dönünce durum otomatik güncellenir.
