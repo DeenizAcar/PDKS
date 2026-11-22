@@ -61,6 +61,7 @@ function go(name) {
   screen = name;
   hidePanel();
   closeModal();
+  if (name === 'main') { window.scrollTo(0, 0); fitDate(); }
   if (name === 'tanimlar') renderCards();
   if (name === 'hareketler') openHareketler();
   if (name === 'ayarlar') renderSettings();
@@ -388,9 +389,11 @@ function ledSvg(text) {
 let lastDateTxt = '';
 function fitDate() {
   const el = $('dateBig');
+  const w = el.clientWidth;
+  if (!w) return; // ana ekran gizliyken ölçme (genişlik 0 olur); ana ekrana dönünce yeniden hesaplanır
   el.style.fontSize = '100px';
-  const w = el.clientWidth, sw = el.scrollWidth;
-  if (w && sw) el.style.fontSize = Math.floor(100 * (w * 0.96) / sw) + 'px';
+  const sw = el.scrollWidth;
+  if (sw) el.style.fontSize = Math.floor(100 * (w * 0.96) / sw) + 'px';
   $('dayBig').style.fontSize = el.style.fontSize; // gün adı tarih büyüklüğünde
 }
 function tick() {

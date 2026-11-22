@@ -56,12 +56,17 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
 
         web = new WebView(this);
         web.setBackgroundColor(Color.parseColor("#0F172A"));
+        web.setOverScrollMode(View.OVER_SCROLL_NEVER);
+        web.setVerticalScrollBarEnabled(false);
+        web.setHorizontalScrollBarEnabled(false);
         WebSettings ws = web.getSettings();
         ws.setJavaScriptEnabled(true);
         ws.setDomStorageEnabled(true);
         ws.setDatabaseEnabled(true);
         ws.setAllowFileAccess(true);
         ws.setMediaPlaybackRequiresUserGesture(false);
+        ws.setSupportZoom(false);
+        ws.setBuiltInZoomControls(false);
         web.addJavascriptInterface(new Bridge(), "Android");
         web.setWebChromeClient(new WebChromeClient());
         web.setWebViewClient(new WebViewClient() {
