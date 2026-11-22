@@ -94,9 +94,9 @@ function setNfcState(on) {
     $('stSub').textContent = 'Personel kartınızı telefonun arkasına yaklaştırınız.';
     $('tnTitle').textContent = 'Tanımlamak istediğiniz kartı okutunuz...';
   } else {
-    $('stTitle').textContent = 'Telefonun kart okuma özelliği kapalı...';
+    $('stTitle').textContent = 'Cihazın kart okuma özelliği kapalı...';
     $('stSub').textContent = 'Kart okuma özelliğinin kapalı olduğunu yetkiliye haber veriniz.';
-    $('tnTitle').textContent = 'Telefonun kart okuma özelliği kapalı...';
+    $('tnTitle').textContent = 'Cihazın kart okuma özelliği kapalı...';
   }
   document.querySelector('#scr-tanimlar .tip').classList.toggle('off', !nfcOn);
   $('nfcOrb').classList.toggle('off', !nfcOn);
