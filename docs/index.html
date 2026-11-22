@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f172a">
+<title>PDKS</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- Üst panel (yönetici kartı ile görünür, 5 sn sonra gizlenir) -->
+<div id="panel" class="panel">
+  <button data-go="tanimlar">Tanımlar</button>
+  <button data-go="hareketler">Hareketler</button>
+  <button data-go="ayarlar">Ayarlar</button>
+</div>
+
+<!-- ANA EKRAN -->
+<section id="scr-main" class="screen active">
+  <div id="idle" class="idle">
+    <div id="nfcIcon" class="nfc-icon">
+      <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"><rect x="16" y="6" width="32" height="52" rx="6"/><path d="M27 24c3 3 3 13 0 16"/><path d="M33 20c5 5 5 19 0 24"/><path d="M39 16c7 7 7 25 0 32"/></svg>
+    </div>
+    <h1 id="stTitle">Kartınızı okutmanız için bekleniyor...</h1>
+    <p id="stSub">Personel kartınızı telefonun arkasına yaklaştırınız.</p>
+    <p id="webHint" class="hint hidden"></p>
+  </div>
+
+  <div id="result" class="result hidden">
+    <div id="rName" class="r-name"></div>
+    <div id="rFrame" class="r-frame">
+      <div id="rIcon" class="r-icon"></div>
+      <div id="rInner" class="r-inner"></div>
+    </div>
+    <div id="rBelow" class="r-below"></div>
+  </div>
+
+  <div id="clock" class="clock"></div>
+</section>
+
+<!-- TANIMLAR -->
+<section id="scr-tanimlar" class="screen">
+  <header class="bar"><button class="back">‹ Ana Ekran</button><h2>Tanımlar</h2></header>
+  <div class="content">
+    <div class="tip"><b id="tnTitle">Tanımlamak istediğiniz kartı okutunuz...</b><br><span id="tnSub">Kartı telefonun arkasına yaklaştırınız. Ad soyad girmeniz için pencere açılacaktır.</span></div>
+    <table class="grid">
+      <thead><tr><th>Adı Soyadı</th><th>Kart No</th><th></th></tr></thead>
+      <tbody id="cardList"></tbody>
+    </table>
+    <p id="cardEmpty" class="empty">Henüz tanımlı kart yok.</p>
+  </div>
+</section>
+
+<!-- HAREKETLER -->
+<section id="scr-hareketler" class="screen">
+  <header class="bar"><button class="back">‹ Ana Ekran</button><h2>Hareketler</h2></header>
+  <div class="content">
+    <div class="tbl-wrap top">
+      <table class="grid sel">
+        <thead><tr><th>Adı Soyadı</th><th>Kart No</th></tr></thead>
+        <tbody id="perList"></tbody>
+      </table>
+      <p id="perEmpty" class="empty">Seçilen tarihlerde hareket kaydı yok.</p>
+    </div>
+    <div class="filter">
+      <label>Başlangıç<input type="date" id="fStart"></label>
+      <label>Bitiş<input type="date" id="fEnd"></label>
+      <button id="btnAdd" class="primary">+ Hareket Ekle</button>
+    </div>
+    <div class="tbl-wrap">
+      <table class="grid">
+        <thead><tr><th>İşlem Tarihi</th><th>İşlem Saati</th><th>Tür</th><th></th></tr></thead>
+        <tbody id="movList"></tbody>
+      </table>
+      <p id="movEmpty" class="empty">Kayıt yok.</p>
+    </div>
+  </div>
+</section>
+
+<!-- AYARLAR -->
+<section id="scr-ayarlar" class="screen">
+  <header class="bar"><button class="back">‹ Ana Ekran</button><h2>Ayarlar</h2></header>
+  <div class="content">
+    <label class="chk"><input type="checkbox" id="setVoice"> <span>Sesli oku</span></label>
+    <label class="chk sub"><input type="checkbox" id="setVoiceTime"> <span>Ad Soyad'dan sonra saati söyle</span></label>
+    <p class="note">Sesli oku seçili ise kart okutulduğunda tanımlı kişilerin adı soyadı sesli söylenir. Tanımsız kartlarda “Tanımsız kart okuttunuz, lütfen yetkiliye danışınız.” denir, saat söylenmez.</p>
+    <button id="btnTestVoice">Sesi Dene</button>
+  </div>
+</section>
+
+<!-- Pencere (modal) -->
+<div id="modal" class="modal hidden">
+  <div class="box">
+    <h3 id="mTitle"></h3>
+    <div id="mBody"></div>
+    <div class="actions">
+      <button id="mCancel">İptal</button>
+      <button id="mOk" class="primary">Tamam</button>
+    </div>
+  </div>
+</div>
+
+<div id="toast" class="toast hidden"></div>
+<div id="startOverlay" class="start hidden"><div><h2>Kart okumayı başlatmak için ekrana dokunun</h2><p>Tarayıcı NFC izni isteyecektir.</p></div></div>
+
+<script src="app.js"></script>
+</body>
+</html>

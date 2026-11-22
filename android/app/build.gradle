@@ -1,0 +1,42 @@
+plugins { id 'com.android.application' }
+
+def keyProps = new Properties()
+def keyFile = rootProject.file('keystore.properties')
+if (keyFile.exists()) keyFile.withInputStream { keyProps.load(it) }
+
+android {
+    namespace 'com.pdks.app'
+    compileSdk 35
+    defaultConfig {
+        applicationId 'com.pdks.app'
+        minSdk 21
+        targetSdk 35
+        versionCode 1
+        versionName '1.0'
+    }
+    signingConfigs {
+        release {
+            if (keyFile.exists()) {
+                storeFile rootProject.file(keyProps['storeFile'])
+                storePassword keyProps['storePassword']
+                keyAlias keyProps['keyAlias']
+                keyPassword keyProps['keyPassword']
+            }
+        }
+    }
+    buildTypes {
+        release {
+            minifyEnabled false
+            signingConfig keyFile.exists() ? signingConfigs.release : signingConfigs.debug
+        }
+    }
+    compileOptions { sourceCompatibility JavaVersion.VERSION_11; targetCompatibility JavaVersion.VERSION_11 }
+    sourceSets { main { assets.srcDirs = ["$buildDir/webassets"] } }
+}
+
+// Web uygulamasını (docs/) APK içine kopyala
+tasks.register('copyWeb', Copy) {
+    from(rootProject.file('../docs')) { exclude 'apk/**', 'sw.js', '.nojekyll' }
+    into "$buildDir/webassets/www"
+}
+preBuild.dependsOn copyWeb
