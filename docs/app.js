@@ -47,6 +47,7 @@ function speak(text) {
   speechSynthesis.cancel();
   const u = new SpeechSynthesisUtterance(text);
   u.lang = 'tr-TR';
+  u.rate = 1.6;
   const v = speechSynthesis.getVoices().find((x) => x.lang && x.lang.toLowerCase().startsWith('tr'));
   if (v) u.voice = v;
   speechSynthesis.speak(u);
@@ -98,7 +99,20 @@ function setNfcState(on) {
     $('tnTitle').textContent = 'Telefonun kart okuma özelliği kapalı...';
   }
   document.querySelector('#scr-tanimlar .tip').classList.toggle('off', !nfcOn);
+  $('nfcOrb').classList.toggle('off', !nfcOn);
 }
+
+// Tanımlar ekranındaki NFC simgesi: tıklanınca NFC aç/kapat
+$('nfcToggle').addEventListener('click', () => {
+  if (isNative && window.Android.toggleNfc) {
+    window.Android.toggleNfc();
+  } else if ('NDEFReader' in window) {
+    if (webScanning) { stopWebNfc(); toast('Kart okuma durduruldu.'); }
+    else startWebNfc(true);
+  } else {
+    toast('Bu tarayıcıda NFC desteklenmiyor.');
+  }
+});
 
 /* ---------- Sonuç gösterimi ---------- */
 const ICON_OK = '<svg viewBox="0 0 100 100"><path d="M18 52 L40 74 L84 26" fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -125,6 +139,7 @@ function clearResult() {
 
 /* ---------- Kart okuma ---------- */
 function onCard(raw) {
+  if (document.hidden) return; // uygulama arka plandayken kart okuma yapma
   const uid = normUid(raw);
   if (!uid) return;
 
@@ -295,33 +310,50 @@ $('movList').addEventListener('click', (e) => {
   });
 });
 $('btnAdd').addEventListener('click', () => {
-  const people = new Map();
-  Object.entries(cards).forEach(([u, n]) => people.set(u, n));
-  records.forEach((r) => { if (!people.has(r.uid)) people.set(r.uid, r.name); });
-  if (!people.size) { toast('Önce Tanımlar ekranından kart tanımlayınız.'); return; }
-  const opts = [...people].sort((a, b) => a[1].localeCompare(b[1], 'tr'))
-    .map(([u, n]) => `<option value="${esc(u)}" ${u === selUid ? 'selected' : ''}>${esc(n)} (${esc(u)})</option>`).join('');
+  if (!selUid) { toast('Önce üstteki listeden bir personel seçiniz.'); return; }
+  const uid = selUid, name = uidName(uid);
   const now = new Date();
+  const e = range()[1];
   openModal('Hareket Ekle',
-    `<label>Personel</label><select id="aUid">${opts}</select>
-     <label>Tarih</label><input type="date" id="aDate" value="${range()[1] < dateStr() ? range()[1] : dateStr()}">
+    `<div><b>${esc(name)}</b> <span class="mono">(${esc(uid)})</span></div>
+     <label>Tarih</label><input type="date" id="aDate" value="${e < dateStr() ? e : dateStr()}">
      <label>Saat</label><input type="time" id="aTime" value="${pad(now.getHours())}:${pad(now.getMinutes())}">
      <label>Geçiş Türü</label><select id="aType"><option>${GIRIS}</option><option>${CIKIS}</option></select>`,
     'Ekle', () => {
-      const uid = $('aUid').value, date = $('aDate').value, t = $('aTime').value, type = $('aType').value;
-      if (!uid || !date || !t) { toast('Tüm alanları doldurunuz.'); return false; }
-      records.push({ id: newId(), uid, name: people.get(uid), date, time: t.length === 5 ? t + ':00' : t, type });
+      const date = $('aDate').value, t = $('aTime').value.slice(0, 5), type = $('aType').value;
+      if (!date || !t) { toast('Tarih ve saat giriniz.'); return false; }
+      if (records.some((r) => r.uid === uid && r.date === date && hm(r.time) === t)) {
+        toast('Bu zamana ait bir hareket kaydı zaten var.', 3500);
+        return false;
+      }
+      records.push({ id: newId(), uid, name, date, time: t + ':00', type });
       save('pdks_records', records);
-      selUid = uid;
-      const [s, e] = range();
-      if (date < s) $('fStart').value = date;
-      if (date > e) $('fEnd').value = date;
+      const [s0, e0] = range();
+      if (date < s0) $('fStart').value = date;
+      if (date > e0) $('fEnd').value = date;
       renderPersons();
     });
 });
 
 /* ---------- Ayarlar ---------- */
+const DAYS = ['Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi', 'Pazar'];
+if (!Array.isArray(settings.shifts) || settings.shifts.length !== 7) {
+  settings.shifts = DAYS.map(() => ({ start: '00:00', end: '00:00' }));
+}
+function renderShifts() {
+  $('shiftList').innerHTML = DAYS.map((d, i) =>
+    `<tr><td>${d}</td>
+     <td><input type="time" data-i="${i}" data-k="start" value="${settings.shifts[i].start}"></td>
+     <td><input type="time" data-i="${i}" data-k="end" value="${settings.shifts[i].end}"></td></tr>`).join('');
+}
+$('shiftList').addEventListener('change', (e) => {
+  const el = e.target; if (!el.dataset.k) return;
+  settings.shifts[+el.dataset.i][el.dataset.k] = el.value || '00:00';
+  if (!el.value) el.value = '00:00';
+  save('pdks_settings', settings);
+});
 function renderSettings() {
+  renderShifts();
   $('setVoice').checked = settings.voice;
   $('setVoiceTime').checked = settings.voiceTime;
   $('setVoiceTime').disabled = !settings.voice;
@@ -331,11 +363,42 @@ $('setVoice').addEventListener('change', (e) => { settings.voice = e.target.chec
 $('setVoiceTime').addEventListener('change', (e) => { settings.voiceTime = e.target.checked; save('pdks_settings', settings); });
 $('btnTestVoice').addEventListener('click', () => speak(settings.voiceTime ? `Ahmet Yılmaz. Saat ${hm(timeStr())}` : 'Ahmet Yılmaz'));
 
-/* ---------- Saat ---------- */
+/* ---------- Saat (tarih + LED saat) ---------- */
+const SEG = {
+  a: '12,4 48,4 54,10 48,16 12,16 6,10', b: '54,12 60,18 60,42 54,48 48,42 48,18',
+  c: '54,52 60,58 60,82 54,88 48,82 48,58', d: '12,84 48,84 54,90 48,96 12,96 6,90',
+  e: '6,52 12,58 12,82 6,88 0,82 0,58', f: '6,12 12,18 12,42 6,48 0,42 0,18',
+  g: '12,44 48,44 54,50 48,56 12,56 6,50',
+};
+const DIG = ['abcdef', 'bc', 'abdeg', 'abcdg', 'bcfg', 'acdfg', 'acdefg', 'abc', 'abcdefg', 'abcdfg'];
+function ledSvg(text) {
+  let x = 4, out = '';
+  for (const ch of text) {
+    if (ch === ':') {
+      out += `<circle class="on" cx="${x + 8}" cy="32" r="6"/><circle class="on" cx="${x + 8}" cy="70" r="6"/>`;
+      x += 22; continue;
+    }
+    const on = DIG[+ch];
+    out += `<g transform="translate(${x} 0) skewX(-6)">` +
+      Object.keys(SEG).map((k) => `<polygon class="${on.includes(k) ? 'on' : 'of'}" points="${SEG[k]}"/>`).join('') + '</g>';
+    x += 72;
+  }
+  return `<svg viewBox="0 0 ${x} 100" xmlns="http://www.w3.org/2000/svg">${out}</svg>`;
+}
+let lastDateTxt = '';
+function fitDate() {
+  const el = $('dateBig');
+  el.style.fontSize = '100px';
+  const w = el.clientWidth, sw = el.scrollWidth;
+  if (w && sw) el.style.fontSize = Math.floor(100 * (w * 0.96) / sw) + 'px';
+}
 function tick() {
   const d = new Date();
-  $('clock').textContent = `${trDate(dateStr(d))}  ${timeStr(d)}`;
+  const t = trDate(dateStr(d));
+  if (t !== lastDateTxt) { lastDateTxt = t; $('dateBig').textContent = t; fitDate(); }
+  $('led').innerHTML = ledSvg(timeStr(d));
 }
+window.addEventListener('resize', fitDate);
 setInterval(tick, 1000); tick();
 
 /* ---------- NFC: Android uygulaması ---------- */
@@ -343,16 +406,25 @@ window.onNativeCard = (uid) => onCard(uid);
 window.onNativeNfcState = (on) => setNfcState(on);
 
 /* ---------- NFC: Web (Chrome Android - Web NFC) ---------- */
-let webReader = null, webScanning = false;
+let webReader = null, webScanning = false, webAbort = null, webUserStopped = false;
+function stopWebNfc(byUser = true) {
+  if (webAbort) webAbort.abort();
+  webAbort = null; webScanning = false;
+  if (byUser) webUserStopped = true;
+  setNfcState(false);
+}
 async function startWebNfc(fromGesture) {
-  if (webScanning) return;
+  if (webScanning || document.hidden) return;
+  if (fromGesture) webUserStopped = false;
+  if (webUserStopped) return;
   try {
     if (!webReader) {
       webReader = new NDEFReader();
       webReader.addEventListener('reading', (e) => onCard(e.serialNumber));
       webReader.addEventListener('readingerror', () => {});
     }
-    await webReader.scan();
+    webAbort = new AbortController();
+    await webReader.scan({ signal: webAbort.signal });
     webScanning = true;
     $('startOverlay').classList.add('hidden');
     setNfcState(true);
@@ -388,6 +460,11 @@ document.addEventListener('keydown', (e) => {
         .then((p) => { if (p.state === 'granted') startWebNfc(false); else $('startOverlay').classList.remove('hidden'); })
         .catch(() => $('startOverlay').classList.remove('hidden'));
     } else $('startOverlay').classList.remove('hidden');
+    // Arka plana geçince okumayı durdur, öne gelince yeniden başlat
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) { if (webScanning) stopWebNfc(false); }
+      else startWebNfc(false);
+    });
     // NFC kapalıysa periyodik olarak tekrar dene
     setInterval(() => { if (!webScanning) startWebNfc(false); }, 4000);
   } else {

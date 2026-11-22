@@ -20,6 +20,7 @@
 
 <!-- ANA EKRAN -->
 <section id="scr-main" class="screen active">
+  <div class="main-mid">
   <div id="idle" class="idle">
     <div id="nfcIcon" class="nfc-icon">
       <svg viewBox="0 0 64 64" fill="none" stroke="currentColor" stroke-width="3.5" stroke-linecap="round"><rect x="16" y="6" width="32" height="52" rx="6"/><path d="M27 24c3 3 3 13 0 16"/><path d="M33 20c5 5 5 19 0 24"/><path d="M39 16c7 7 7 25 0 32"/></svg>
@@ -37,13 +38,18 @@
     </div>
     <div id="rBelow" class="r-below"></div>
   </div>
+  </div>
 
-  <div id="clock" class="clock"></div>
+  <div class="clockbox">
+    <div id="dateBig" class="date-big"></div>
+    <div id="led" class="led"></div>
+  </div>
 </section>
 
 <!-- TANIMLAR -->
 <section id="scr-tanimlar" class="screen">
-  <header class="bar"><button class="back">‹ Ana Ekran</button><h2>Tanımlar</h2></header>
+  <header class="bar"><button class="back">‹ Ana Ekran</button><h2>Tanımlar</h2>
+    <button id="nfcToggle" class="nfc-st" title="NFC aç / kapat"><span>NFC :</span><i id="nfcOrb" class="orb off"></i></button></header>
   <div class="content">
     <div class="tip"><b id="tnTitle">Tanımlamak istediğiniz kartı okutunuz...</b><br><span id="tnSub">Kartı telefonun arkasına yaklaştırınız. Ad soyad girmeniz için pencere açılacaktır.</span></div>
     <table class="grid">
@@ -88,6 +94,13 @@
     <label class="chk sub"><input type="checkbox" id="setVoiceTime"> <span>Ad Soyad'dan sonra saati söyle</span></label>
     <p class="note">Sesli oku seçili ise kart okutulduğunda tanımlı kişilerin adı soyadı sesli söylenir. Tanımsız kartlarda “Tanımsız kart okuttunuz, lütfen yetkiliye danışınız.” denir, saat söylenmez.</p>
     <button id="btnTestVoice">Sesi Dene</button>
+    <h3 class="sec">Mesai Günleri ve Saatleri</h3>
+    <div class="tbl-wrap shifts">
+      <table class="grid">
+        <thead><tr><th>Gün</th><th>Başlama Saati</th><th>Bitiş Saati</th></tr></thead>
+        <tbody id="shiftList"></tbody>
+      </table>
+    </div>
   </div>
 </section>
 

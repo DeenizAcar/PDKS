@@ -49,6 +49,7 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
         tts = new TextToSpeech(this, status -> {
             if (status == TextToSpeech.SUCCESS) {
                 tts.setLanguage(new Locale("tr", "TR"));
+                tts.setSpeechRate(1.6f);
                 ttsReady = true;
             }
         });
@@ -98,8 +99,11 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
         return nfc != null && nfc.isEnabled();
     }
 
+    private boolean resumed = false;
+
     private void enableReader() {
-        if (nfc == null || !nfc.isEnabled()) return;
+        // Sadece uygulama ön plandayken kart oku; arka planda diğer uygulamalarla çakışma
+        if (!resumed || nfc == null || !nfc.isEnabled()) return;
         int flags = NfcAdapter.FLAG_READER_NFC_A | NfcAdapter.FLAG_READER_NFC_B
                 | NfcAdapter.FLAG_READER_NFC_F | NfcAdapter.FLAG_READER_NFC_V
                 | NfcAdapter.FLAG_READER_NFC_BARCODE | NfcAdapter.FLAG_READER_SKIP_NDEF_CHECK;
@@ -118,6 +122,7 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
 
     @Override
     public void onTagDiscovered(Tag tag) {
+        if (!resumed) return;
         byte[] id = tag.getId();
         if (id == null) return;
         StringBuilder sb = new StringBuilder();
@@ -129,6 +134,7 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
     @Override
     protected void onResume() {
         super.onResume();
+        resumed = true;
         enableReader();
         pushNfcState();
     }
@@ -136,16 +142,10 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
     @Override
     protected void onPause() {
         super.onPause();
+        resumed = false;
         if (nfc != null) {
             try { nfc.disableReaderMode(this); } catch (Exception ignored) { }
         }
-    }
-
-    @Override
-    protected void onNewIntent(Intent intent) {
-        super.onNewIntent(intent);
-        Tag tag = intent.getParcelableExtra(NfcAdapter.EXTRA_TAG);
-        if (tag != null) onTagDiscovered(tag);
     }
 
     @Override
@@ -169,6 +169,19 @@ public class MainActivity extends Activity implements NfcAdapter.ReaderCallback 
 
         @JavascriptInterface
         public boolean hasNfc() { return nfc != null; }
+
+        // Android, uygulamaların NFC'yi doğrudan açıp kapatmasına izin vermez;
+        // bu yüzden NFC ayar ekranı açılır, geri dönünce durum otomatik güncellenir.
+        @JavascriptInterface
+        public void toggleNfc() {
+            runOnUiThread(() -> {
+                try {
+                    startActivity(new Intent(android.provider.Settings.ACTION_NFC_SETTINGS));
+                } catch (Exception e) {
+                    try { startActivity(new Intent(android.provider.Settings.ACTION_WIRELESS_SETTINGS)); } catch (Exception ignored) { }
+                }
+            });
+        }
 
         @JavascriptInterface
         public void speak(String text) {
