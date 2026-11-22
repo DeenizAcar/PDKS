@@ -391,11 +391,17 @@ function fitDate() {
   el.style.fontSize = '100px';
   const w = el.clientWidth, sw = el.scrollWidth;
   if (w && sw) el.style.fontSize = Math.floor(100 * (w * 0.96) / sw) + 'px';
+  $('dayBig').style.fontSize = el.style.fontSize; // gün adı tarih büyüklüğünde
 }
 function tick() {
   const d = new Date();
   const t = trDate(dateStr(d));
-  if (t !== lastDateTxt) { lastDateTxt = t; $('dateBig').textContent = t; fitDate(); }
+  if (t !== lastDateTxt) {
+    lastDateTxt = t;
+    $('dateBig').textContent = t;
+    $('dayBig').textContent = upper(DAYS[(d.getDay() + 6) % 7]);
+    fitDate();
+  }
   $('led').innerHTML = ledSvg(timeStr(d));
 }
 window.addEventListener('resize', fitDate);
