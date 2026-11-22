@@ -90,7 +90,7 @@ function setNfcState(on) {
   $('idle').classList.toggle('off', !nfcOn);
   $('nfcIcon').classList.toggle('off', !nfcOn);
   if (nfcOn) {
-    $('stTitle').textContent = 'Kartınızı okutmanız için bekleniyor...';
+    $('stTitle').textContent = 'Kart okutmanız için bekleniyor...';
     $('stSub').textContent = 'Personel kartınızı telefonun arkasına yaklaştırınız.';
     $('tnTitle').textContent = 'Tanımlamak istediğiniz kartı okutunuz...';
   } else {
