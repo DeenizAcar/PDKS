@@ -101,4 +101,5 @@ input[type=checkbox]{width:26px;height:26px;accent-color:var(--green)}
 .nfc-st:active .orb{transform:translateY(1px) scale(.96)}
 .sec{margin:14px 0 0}
 .tbl-wrap.shifts{flex:0 0 auto}
-.shifts input[type=time]{padding:6px 8px;max-width:130px}
+.shifts .grid th,.shifts .grid td{padding:2px 8px;line-height:1.1}
+.shifts input[type=time]{padding:1px 6px;max-width:120px;height:28px;font-size:15px;border-radius:6px}
