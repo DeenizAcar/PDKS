@@ -17,8 +17,6 @@ let personel = load('pdks_personel', null);  // [{id, ad, cinsiyet, pasif, kart}
 let silinen = load('pdks_silinen', []);       // [{id, zaman, ad, pasif, kart}] silinen personel arşivi
 let records = load('pdks_records', []);      // [{id, pid, uid, name, date:'YYYY-MM-DD', time:'HH:MM:SS', type}]
 let settings = Object.assign({ voice: false, voiceTime: false }, load('pdks_settings', {}));
-let lastOk = load('pdks_lastok', {});         // { kartNo: {ts, type} } son başarılı giriş/çıkış
-let unknownState = load('pdks_unknown', {});  // { kartNo: {date, ts, type} } tanımsız kartlar için
 const lastSeen = {};                           // { kartNo: ts } 5 sn yok sayma için son dikkate alınan okuma
 
 /* ---------- Yardımcılar ---------- */
@@ -145,11 +143,13 @@ const ICON_OK = '<svg viewBox="0 0 100 100"><path d="M18 52 L40 74 L84 26" fill=
 const ICON_BAD = '<svg viewBox="0 0 100 100"><path d="M22 22 L78 78 M78 22 L22 78" fill="none" stroke="currentColor" stroke-width="11" stroke-linecap="round"/></svg>';
 const ICON_DUP = '<svg viewBox="0 0 100 100"><path d="M32 34 a18 18 0 1 1 26 16 c-6 3 -8 7 -8 14" fill="none" stroke="currentColor" stroke-width="10" stroke-linecap="round"/><circle cx="50" cy="84" r="6.5" fill="currentColor"/></svg>';
 
-function showResult(kind, { name = '', inner = '', below = '' }, ms) {
+function showResult(kind, { name = '', head = '', inner = '', below = '' }, ms) {
   const r = $('result');
   r.className = 'result ' + kind;
   void r.offsetWidth; // animasyonu yeniden başlat
   $('rName').textContent = name;
+  $('rHead').textContent = head;
+  $('rHead').classList.toggle('hidden', !head);
   $('rIcon').innerHTML = kind === 'ok' ? ICON_OK : kind === 'bad' ? ICON_BAD : ICON_DUP;
   $('rInner').innerHTML = inner;
   $('rBelow').textContent = below;
@@ -184,55 +184,40 @@ function onCard(raw) {
   if (screen !== 'main') return;
 
   const p = byKart(uid);
-  if (p && !p.pasif) processKnown(p, uid, now); else processUnknown(uid, now); // pasif personelin kartı tanımsız sayılır
+  if (p && !p.pasif) processKnown(p, uid, now); else processUnknown(); // pasif personelin kartı tanımsız sayılır
 }
 
-function nextTypeFor(pid, today) {
+// Kararlar hareket kayıtlarına göre verilir (kayıt silinirse ona göre davranır)
+const recTs = (r) => { const [y, m, d] = r.date.split('-').map(Number); const [h, mi, se] = r.time.split(':').map(Number); return new Date(y, m - 1, d, h, mi, se || 0).getTime(); };
+function lastRecFor(pid, today) {
   const todays = records.filter((r) => r.pid === pid && r.date === today).sort(sortRecs);
-  const last = todays[todays.length - 1];
-  return !last || last.type === CIKIS ? GIRIS : CIKIS;
+  return todays[todays.length - 1] || null;
 }
 
 function processKnown(p, uid, now) {
   const d = new Date(now), today = dateStr(d);
   const name = p.ad;
-  const lo = lastOk[p.id];
+  const last = lastRecFor(p.id, today);
 
-  // Son başarılı okutmadan bu yana 5 dk geçmediyse (aynı gün)
-  if (lo && now - lo.ts < RECENT_MS && dateStr(new Date(lo.ts)) === today) {
-    const t = lo.type === GIRIS ? 'Giriş' : 'Çıkış';
-    showResult('dup', { name: upper(name), below: `${t} işleminiz yakın zamanda zaten yapıldı.` }, DUP_MS);
-    if (settings.voice) speak(`${name}. ${t} işleminiz yakın zamanda zaten yapıldı.`);
+  // Son hareket kaydından bu yana 5 dk geçmediyse
+  if (last && now - recTs(last) >= 0 && now - recTs(last) < RECENT_MS) {
+    showResult('dup', { name: upper(name), below: 'İşleminiz yakın zamanda zaten yapılmıştı.' }, DUP_MS);
+    if (settings.voice) speak(`${name}. İşleminiz yakın zamanda zaten yapılmıştı.`);
     return;
   }
 
-  const type = nextTypeFor(p.id, today);
+  const type = !last || last.type === CIKIS ? GIRIS : CIKIS;
   const time = timeStr(d);
   records.push({ id: newId(), pid: p.id, uid, name, date: today, time, type });
   save('pdks_records', records);
-  lastOk[p.id] = { ts: now, type };
-  save('pdks_lastok', lastOk);
 
   const msg = type === GIRIS ? 'GİRİŞİNİZ BAŞARI İLE YAPILDI' : 'ÇIKIŞINIZ BAŞARI İLE YAPILDI';
-  showResult('ok', { name: upper(name), inner: `Kart okutma işleminiz tamamlandı...<br>${msg} : ${hm(time)}` }, OK_MS);
-  if (settings.voice) speak(settings.voiceTime ? `${name}. ${hm(time)} ${type === GIRIS ? 'giriş' : 'çıkış'}` : name);
+  showResult('ok', { name: upper(name), head: type === GIRIS ? 'GİRİŞ' : 'ÇIKIŞ', inner: `Kart okutma işleminiz tamamlandı...<br>${msg} : ${hm(time)}` }, OK_MS);
+  if (settings.voice) speak(`${name}. ${settings.voiceTime ? hm(time) + ' ' : ''}${type === GIRIS ? 'giriş' : 'çıkış'}`);
 }
 
-function processUnknown(uid, now) {
-  const today = dateStr(new Date(now));
-  let st = unknownState[uid];
-  let type;
-  if (!st || st.date !== today) type = GIRIS;
-  else if (now - st.ts < RECENT_MS) type = st.type;     // 5 dk içinde: aynı işlem
-  else type = st.type === GIRIS ? CIKIS : GIRIS;
-  if (!st || st.date !== today || now - st.ts >= RECENT_MS) {
-    unknownState[uid] = { date: today, ts: now, type };
-    save('pdks_unknown', unknownState);
-  }
-  showResult('bad', {
-    inner: 'Kart okutma işleminiz tamamlanamadı.',
-    below: type === GIRIS ? 'GİRİŞ İŞLEMİNİZ YAPILAMADI' : 'ÇIKIŞ İŞLEMİNİZ YAPILAMADI',
-  }, BAD_MS);
+function processUnknown() {
+  showResult('bad', { inner: 'Kart okutma işleminiz tamamlanamadı.', below: 'İŞLEMİNİZ YAPILAMADI' }, BAD_MS);
   if (settings.voice) speak('Tanımsız kart okuttunuz, lütfen yetkiliye danışınız.');
 }
 
@@ -277,11 +262,13 @@ $('overlay').addEventListener('click', () => { if (!$('popMenu').classList.conta
 let onayCb = null;
 function onay(baslik, mesaj, cb) {
   $('onayTitle').textContent = baslik; $('onayMsg').textContent = mesaj; onayCb = cb;
+  $('onayMsg').classList.remove('warn');
   $('onayEvet').textContent = 'Evet'; $('onayHayir').classList.remove('hidden');
   dialogAc('dlgOnay');
 }
 function uyari(baslik, mesaj) {
   $('onayTitle').textContent = baslik; $('onayMsg').textContent = mesaj; onayCb = null;
+  $('onayMsg').classList.add('warn'); // uyarı yazıları kırmızı bold
   $('onayEvet').textContent = 'Tamam'; $('onayHayir').classList.add('hidden');
   dialogAc('dlgOnay');
 }
@@ -453,10 +440,10 @@ $('inpKart').addEventListener('focus', () => $('inpKart').blur());
 function tanimKart(uid) {
   if (!$('dlgOnay').classList.contains('hidden')) return; // onay/uyarı açıkken yok say
   if ($('dlgPersonel').classList.contains('hidden')) {
-    // pencere kapalı: kart tanımlıysa o personeli düzenle, değilse yeni personel penceresini kart no ile aç
+    // pencere kapalı: kart tanımlıysa o personeli düzenle, değilse uyarı ver
     menuKapat();
     const p = byKart(uid);
-    personelDialog(p || null, p ? '' : uid);
+    if (p) personelDialog(p, ''); else uyari('Uyarı', 'Bu kart sistemde kayıtlı değil.');
     return;
   }
   const cur = $('inpKart').value;
@@ -487,7 +474,7 @@ function renderSilinen() {
   $('silinenEmpty').classList.toggle('hidden', liste.length > 0);
   liste.forEach((k) => {
     const tr = document.createElement('tr');
-    tr.innerHTML = `<td><b>${fmtZaman(k.zaman)}</b></td><td><span class="fit"><span class="pname">${esc(k.ad)}</span></span>` +
+    tr.innerHTML = `<td><b>${fmtZaman(k.zaman)}</b></td><td><span class="fit"><span class="pname">${esc(k.ad)}</span>${k.kart ? ` <span class="skart">(${esc(k.kart)})</span>` : ''}</span>` +
       (k.pasif ? '<span class="pasifken">(PASİFKEN)</span>' : '') + '</td>';
     satirEtkilesim(tr, (r, x, y) => {
       menuAc(x, y, () => {
@@ -712,7 +699,7 @@ function renderSettings() {
 }
 $('setVoice').addEventListener('change', (e) => { settings.voice = e.target.checked; save('pdks_settings', settings); renderSettings(); });
 $('setVoiceTime').addEventListener('change', (e) => { settings.voiceTime = e.target.checked; save('pdks_settings', settings); });
-$('btnTestVoice').addEventListener('click', () => speak(settings.voiceTime ? `Ahmet Yılmaz. ${hm(timeStr())} giriş` : 'Ahmet Yılmaz'));
+$('btnTestVoice').addEventListener('click', () => speak(`Ahmet Yılmaz. ${settings.voiceTime ? hm(timeStr()) + ' ' : ''}giriş`));
 
 /* ---------- Saat (tarih + LED saat) ---------- */
 const SEG = {

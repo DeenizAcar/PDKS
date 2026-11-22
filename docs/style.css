@@ -182,3 +182,7 @@ input[type=checkbox]{width:26px;height:26px;accent-color:var(--green)}
   .mp .xlbtn{gap:4px}
   .mp .topbar .btn{padding:8px 8px}
 }
+
+.r-head{color:var(--green);font-weight:900;font-size:clamp(30px,11vw,64px);line-height:1;text-align:center;letter-spacing:2px}
+.mp #onayMsg.warn{color:#d32f2f;font-weight:700}
+.mp .skart{font-weight:400;font-style:italic}
